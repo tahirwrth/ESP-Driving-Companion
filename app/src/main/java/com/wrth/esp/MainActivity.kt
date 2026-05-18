@@ -1,6 +1,10 @@
 package com.wrth.esp
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.app.AlertDialog
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -8,9 +12,11 @@ import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
 import android.widget.Button
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import kotlin.collections.isNullOrEmpty
 
 class MainActivity : AppCompatActivity() {
 
@@ -36,13 +42,7 @@ class MainActivity : AppCompatActivity() {
         val btnStop = findViewById<Button>(R.id.btnStop)
 
         btnStart.setOnClickListener {
-            Log.d(null, "killed, btn pressed")
-            // start bluetooth serial connection
-            BluetoothSerialManager.autoConnect("TAHIRPC")
-
-            // start foreground updater service
-            val serviceIntent = Intent(this, ESP32ConnectionService::class.java)
-            startService(serviceIntent)
+            showBluetoothDeviceSelector()
         }
 
         btnStop.setOnClickListener {
@@ -53,6 +53,45 @@ class MainActivity : AppCompatActivity() {
 
             Log.d("MainActivity", "Stop button pressed: Service and Bluetooth radar terminated.")
         }
+    }
+
+    // show list of paired devices
+    @SuppressLint("MissingPermission")
+    private fun showBluetoothDeviceSelector() {
+        val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
+
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
+            Toast.makeText(this, "Please enable Bluetooth first", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val pairedDevices: Set<BluetoothDevice>? = bluetoothAdapter.bondedDevices
+        if (pairedDevices.isNullOrEmpty()) {
+            Toast.makeText(this, "No paired devices found. Pair your ESP32 in settings first.", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        // convert set into arrays for UI
+        val deviceNames = pairedDevices.map { it.name ?: "Unknown Device" }.toTypedArray()
+        val deviceMacs = pairedDevices.map { it.address }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("Select ESP32 Device")
+            .setItems(deviceNames) { _, which ->
+                val selectedName = deviceNames[which]
+                val selectedMac = deviceMacs[which]
+
+                // pass MAC address
+                BluetoothSerialManager.connectToESP32(selectedMac)
+
+                // start background service
+                val serviceIntent = Intent(this, ESP32ConnectionService::class.java)
+                startService(serviceIntent)
+
+                Toast.makeText(this, "Connecting to $selectedName...", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun isNotificationServiceEnabled(): Boolean {

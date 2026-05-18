@@ -35,22 +35,6 @@ object BluetoothSerialManager {
     fun init(context: Context) {
         audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     }
-
-    fun autoConnect(targetDeviceName: String) {
-        val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
-        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) return
-
-        val pairedDevices: Set<BluetoothDevice>? = bluetoothAdapter.bondedDevices
-        if (!pairedDevices.isNullOrEmpty()) {
-            for (device in pairedDevices) {
-                if (device.name == targetDeviceName) {
-                    connectToESP32(device.address)
-                    return
-                }
-            }
-        }
-    }
-
     fun connectToESP32(macAddress: String) {
         val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
         if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) return
@@ -74,7 +58,7 @@ object BluetoothSerialManager {
 
                         listenForCommandsDirect()
 
-                    } catch (e: Exception) { // 2. Changed from IOException to Exception to safeguard thread life
+                    } catch (e: Exception) {
                         Log.e(TAG, "Connection failed: ${e.message}. Retrying in 3 seconds...")
                         cleanSocketsOnly()
                         try {

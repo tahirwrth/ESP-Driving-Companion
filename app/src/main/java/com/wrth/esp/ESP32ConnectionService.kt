@@ -5,7 +5,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
-import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import java.util.Timer
@@ -29,7 +28,7 @@ class ESP32ConnectionService : Service() {
     private fun startUpdateLoop() {
         updateTimer?.cancel()
         updateTimer = Timer()
-        updateTimer?.scheduleAtFixedRate(object : TimerTask() {
+        updateTimer?.schedule(object : TimerTask() {
             override fun run() {
                 if (!BluetoothSerialManager.isConnected) return
 
