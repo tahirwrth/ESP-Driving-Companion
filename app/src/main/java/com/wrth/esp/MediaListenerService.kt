@@ -10,9 +10,11 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Typeface
 import java.io.ByteArrayOutputStream
 import androidx.core.graphics.scale
 import androidx.core.graphics.createBitmap
+import androidx.core.graphics.toColorInt
 
 class MediaListenerService : NotificationListenerService() {
 
@@ -100,6 +102,37 @@ class MediaListenerService : NotificationListenerService() {
 
                         // draw cover art
                         canvas.drawBitmap(centerArt, centerLeft, centerTop, null)
+
+                        // name and artist text
+                        canvas.drawRect(centerLeft, centerTop, centerLeft + coverSize, centerTop + coverSize, shadowPaint)
+                        canvas.drawBitmap(centerArt, centerLeft, centerTop, null)
+
+                        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            color = Color.WHITE
+                            textSize = 24f
+                            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                            textAlign = Paint.Align.CENTER
+                            setShadowLayer(5f, 0f, 2f, Color.BLACK) // slight shadow for visibility
+                        }
+
+                        val artistPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            color = "#CCCCCC".toColorInt() // light gray
+                            textSize = 18f
+                            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+                            textAlign = Paint.Align.CENTER
+                            setShadowLayer(5f, 0f, 2f, Color.BLACK)
+                        }
+
+                        // X is center 180
+                        // Y is relative to bottom of cover art
+                        val textBaseY = coverYPosition + coverSize
+
+                        // truncate text is too long
+                        val displayTitle = if (title.length > 25) title.take(22) + "..." else title
+                        val displayArtist = if (artist.length > 30) artist.take(27) + "..." else artist
+
+                        canvas.drawText(displayTitle, 180f, textBaseY + 50f, titlePaint)
+                        canvas.drawText(displayArtist, 180f, textBaseY + 80f, artistPaint)
 
                         // compress to jpeg as final
                         val out = ByteArrayOutputStream()
