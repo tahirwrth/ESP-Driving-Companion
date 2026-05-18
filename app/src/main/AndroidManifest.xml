@@ -30,7 +30,8 @@
         <service
             android:name="com.wrth.esp.ESP32ConnectionService"
             android:foregroundServiceType="connectedDevice"
-            android:exported="false" />
+            android:exported="false"
+            android:stopWithTask="false" />
         <receiver
             android:name="com.wrth.esp.BluetoothReceiver"
             android:exported="true">

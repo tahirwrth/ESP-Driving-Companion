@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import android.widget.Button
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -35,11 +36,22 @@ class MainActivity : AppCompatActivity() {
         val btnStop = findViewById<Button>(R.id.btnStop)
 
         btnStart.setOnClickListener {
+            Log.d(null, "killed, btn pressed")
+            // start bluetooth serial connection
             BluetoothSerialManager.autoConnect("TAHIRPC")
+
+            // start foreground updater service
+            val serviceIntent = Intent(this, ESP32ConnectionService::class.java)
+            startService(serviceIntent)
         }
 
         btnStop.setOnClickListener {
             BluetoothSerialManager.closeConnection()
+
+            val serviceIntent = Intent(this, ESP32ConnectionService::class.java)
+            stopService(serviceIntent)
+
+            Log.d("MainActivity", "Stop button pressed: Service and Bluetooth radar terminated.")
         }
     }
 

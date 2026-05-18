@@ -22,39 +22,33 @@ object BluetoothSerialManager {
     private const val TAG = "BluetoothSerialManager"
     private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 
+    @Volatile var isConnected = false
+    @Volatile private var shouldLoopConnect = false
+
     private var bluetoothSocket: BluetoothSocket? = null
     private var outputStream: OutputStream? = null
     private var inputStream: InputStream? = null
-    var isConnected = false // global
     private var audioManager: AudioManager? = null
 
-    // callback which MediaListenerService listens to for seek
     var onSeekCommandReceived: ((Int) -> Unit)? = null
 
     fun init(context: Context) {
         audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     }
 
-    @SuppressLint("MissingPermission")
     fun autoConnect(targetDeviceName: String) {
         val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
-        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
-            Log.e(TAG, "Bluetooth is disabled.")
-            return
-        }
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) return
 
         val pairedDevices: Set<BluetoothDevice>? = bluetoothAdapter.bondedDevices
         if (!pairedDevices.isNullOrEmpty()) {
             for (device in pairedDevices) {
-                // if it finds paired device matching name passed from the button
                 if (device.name == targetDeviceName) {
-                    Log.d(TAG, "Found target: ${device.name} [${device.address}]")
                     connectToESP32(device.address)
                     return
                 }
             }
         }
-        Log.e(TAG, "Device '$targetDeviceName' not found. Please pair it first.")
     }
 
     fun connectToESP32(macAddress: String) {
@@ -62,20 +56,44 @@ object BluetoothSerialManager {
         if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) return
 
         val device: BluetoothDevice = bluetoothAdapter.getRemoteDevice(macAddress)
+        shouldLoopConnect = true
+
         thread {
-            try {
-                bluetoothSocket = device.createRfcommSocketToServiceRecord(SPP_UUID)
-                bluetoothSocket?.connect()
-                outputStream = bluetoothSocket?.outputStream
-                inputStream = bluetoothSocket?.inputStream
-                isConnected = true
-                Log.d(TAG, "Connected to ESP32 Successfully")
-                startListeningForCommands()
-            } catch (e: IOException) { Log.e(TAG, "BLUETOOTH FAILED: ${e.message}"); closeConnection() }
+            while (shouldLoopConnect) {
+                if (!isConnected) {
+                    try {
+                        Log.d(TAG, "Attempting Bluetooth connection to ${device.name}...")
+                        bluetoothSocket = device.createRfcommSocketToServiceRecord(SPP_UUID)
+                        bluetoothSocket?.connect()
+
+                        outputStream = bluetoothSocket?.outputStream
+                        inputStream = bluetoothSocket?.inputStream
+                        isConnected = true
+
+                        Log.d(TAG, "Bluetooth Success")
+
+                        listenForCommandsDirect()
+
+                    } catch (e: Exception) { // 2. Changed from IOException to Exception to safeguard thread life
+                        Log.e(TAG, "Connection failed: ${e.message}. Retrying in 3 seconds...")
+                        cleanSocketsOnly()
+                        try {
+                            Thread.sleep(3000)
+                        } catch (ie: InterruptedException) {
+                            Log.e(TAG, "Reconnection sleep interrupted.")
+                            break
+                        }
+                    }
+                } else {
+                    try {
+                        Thread.sleep(1000)
+                    } catch (ie: InterruptedException) { break }
+                }
+            }
+            Log.d(TAG, "Connection loop thread has completely exited.")
         }
     }
 
-    // image and text
     fun sendMediaPacket(title: String, artist: String, imageBytes: ByteArray) {
         if (!isConnected || outputStream == null) return
         thread {
@@ -92,48 +110,48 @@ object BluetoothSerialManager {
 
                 outputStream?.write(buffer.array())
                 outputStream?.flush()
-            } catch (e: IOException) { closeConnection() }
+            } catch (e: IOException) { handleStreamDrop() }
         }
     }
 
-    // timeline
     fun sendTimelinePacket(positionMs: Long, durationMs: Long, isPlaying: Boolean) {
         if (!isConnected || outputStream == null) return
         thread {
             try {
-                // Formatted as: T:Position:Duration:State\n
                 val state = if (isPlaying) "1" else "0"
                 val packetString = "T:$positionMs:$durationMs:$state\n"
 
                 outputStream?.write(packetString.toByteArray(Charsets.UTF_8))
                 outputStream?.flush()
-            } catch (e: IOException) { closeConnection() }
+            } catch (e: IOException) { handleStreamDrop() }
         }
     }
 
-    // listener
-    private fun startListeningForCommands() {
-        thread {
-            val buffer = ByteArray(1024)
-            val stringBuilder = StringBuilder()
+    private fun listenForCommandsDirect() {
+        val buffer = ByteArray(1024)
+        val stringBuilder = StringBuilder()
 
-            while (isConnected) {
-                try {
-                    val bytes = inputStream?.read(buffer) ?: -1
-                    if (bytes > 0) {
-                        val incoming = String(buffer, 0, bytes, Charsets.UTF_8)
-                        stringBuilder.append(incoming)
+        while (isConnected && shouldLoopConnect) {
+            try {
+                val bytes = inputStream?.read(buffer) ?: -1
+                if (bytes > 0) {
+                    val incoming = String(buffer, 0, bytes, Charsets.UTF_8)
+                    stringBuilder.append(incoming)
 
-                        // process commands in new lines
-                        var newlineIdx = stringBuilder.indexOf("\n")
-                        while (newlineIdx != -1) {
-                            val command = stringBuilder.substring(0, newlineIdx).trim()
-                            handleIncomingESP32Command(command)
-                            stringBuilder.delete(0, newlineIdx + 1)
-                            newlineIdx = stringBuilder.indexOf("\n")
-                        }
+                    var newlineIdx = stringBuilder.indexOf("\n")
+                    while (newlineIdx != -1) {
+                        val command = stringBuilder.substring(0, newlineIdx).trim()
+                        handleIncomingESP32Command(command)
+                        stringBuilder.delete(0, newlineIdx + 1)
+                        newlineIdx = stringBuilder.indexOf("\n")
                     }
-                } catch (e: IOException) { break }
+                } else if (bytes == -1) {
+                    throw IOException("Stream ended")
+                }
+            } catch (e: IOException) {
+                Log.e(TAG, "Connection lost during read loop.")
+                handleStreamDrop()
+                break
             }
         }
     }
@@ -153,7 +171,6 @@ object BluetoothSerialManager {
                 audioManager?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PREVIOUS))
                 audioManager?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PREVIOUS))
             }
-            // "S:xx" command extracts the xx as time and does callback
             command.startsWith("S:") -> {
                 val percentage = command.substringAfter("S:").toIntOrNull()
                 if (percentage != null) {
@@ -163,12 +180,26 @@ object BluetoothSerialManager {
         }
     }
 
-    fun closeConnection() {
+    private fun handleStreamDrop() {
         isConnected = false
+        cleanSocketsOnly()
+    }
+
+    fun closeConnection() {
+        Log.w(TAG, "ℹ️ closeConnection() was called!", Throwable())
+        shouldLoopConnect = false
+        isConnected = false
+        cleanSocketsOnly()
+    }
+
+    private fun cleanSocketsOnly() {
         try {
             outputStream?.close()
             inputStream?.close()
             bluetoothSocket?.close()
         } catch (e: IOException) {}
+        outputStream = null
+        inputStream = null
+        bluetoothSocket = null
     }
 }

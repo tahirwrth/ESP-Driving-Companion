@@ -4,23 +4,17 @@ import android.content.ComponentName
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
-import android.media.session.PlaybackState
 import android.service.notification.NotificationListenerService
 import android.util.Log
 import android.graphics.Bitmap
 import java.io.ByteArrayOutputStream
-import java.util.Timer
-import java.util.TimerTask
+import androidx.core.graphics.scale
 
 class MediaListenerService : NotificationListenerService() {
 
     private val TAG = "MediaListenerService"
     private lateinit var mediaSessionManager: MediaSessionManager
     private var currentController: MediaController? = null
-
-    // Timer for our 1-second ticks
-    private var timelineTimer: Timer? = null
-    private var currentTrackDuration: Long = 0L
 
     private val mediaCallback = object : MediaController.Callback() {
         override fun onMetadataChanged(metadata: MediaMetadata?) {
@@ -29,10 +23,20 @@ class MediaListenerService : NotificationListenerService() {
                 val artist = it.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: "Unknown"
                 val albumArt = it.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
                     ?: it.getBitmap(MediaMetadata.METADATA_KEY_ART)
+                val duration = it.getLong(MediaMetadata.METADATA_KEY_DURATION)
 
-                currentTrackDuration = it.getLong(MediaMetadata.METADATA_KEY_DURATION)
+                MediaDataStore.currentTitle = title
+                MediaDataStore.currentArtist = artist
+                MediaDataStore.currentDuration = duration
 
-                prepareDataForESP32(title, artist, albumArt)
+                var imageBytes = ByteArray(0)
+                albumArt?.let { bitmap ->
+                    val scaled = bitmap.scale(200, 200)
+                    val out = ByteArrayOutputStream()
+                    scaled.compress(Bitmap.CompressFormat.JPEG, 75, out)
+                    imageBytes = out.toByteArray()
+                }
+                MediaDataStore.currentArtBytes = imageBytes
             }
         }
     }
@@ -42,15 +46,6 @@ class MediaListenerService : NotificationListenerService() {
         Log.d(TAG, "LISTENER CONNECTED TO OS")
         mediaSessionManager = getSystemService(MEDIA_SESSION_SERVICE) as MediaSessionManager
         val componentName = ComponentName(this, MediaListenerService::class.java)
-
-        // listen for seek command from Bluetooth Manager
-        BluetoothSerialManager.onSeekCommandReceived = { percentage ->
-            if (currentTrackDuration > 0) {
-                val targetPositionMs = (currentTrackDuration * percentage) / 100
-                currentController?.transportControls?.seekTo(targetPositionMs)
-                Log.d(TAG, "Seeking to $percentage% ($targetPositionMs ms)")
-            }
-        }
 
         try {
             val activeSessions = mediaSessionManager.getActiveSessions(componentName)
@@ -72,46 +67,11 @@ class MediaListenerService : NotificationListenerService() {
         currentController = controller
         currentController?.registerCallback(mediaCallback)
 
+        MediaDataStore.currentController = controller
         mediaCallback.onMetadataChanged(controller.metadata)
-
-        // start 1-second ticker when new app takes over
-        startTimelineTracker()
-    }
-
-    private fun startTimelineTracker() {
-        timelineTimer?.cancel()
-        timelineTimer = Timer()
-        timelineTimer?.scheduleAtFixedRate(object : TimerTask() {
-            override fun run() {
-                if (!BluetoothSerialManager.isConnected) {
-                    return
-                }
-
-                currentController?.let { controller ->
-                    val state = controller.playbackState
-                    if (state != null && currentTrackDuration > 0) {
-                        val position = state.position
-                        val isPlaying = state.state == android.media.session.PlaybackState.STATE_PLAYING
-                        BluetoothSerialManager.sendTimelinePacket(position, currentTrackDuration, isPlaying)
-                    }
-                }
-            }
-        }, 0, 1000)
-    }
-
-    private fun prepareDataForESP32(title: String, artist: String, originalBitmap: Bitmap?) {
-        var imageBytes = ByteArray(0)
-        originalBitmap?.let {
-            val scaledBitmap = Bitmap.createScaledBitmap(it, 200, 200, true)
-            val outputStream = ByteArrayOutputStream()
-            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
-            imageBytes = outputStream.toByteArray()
-        }
-        BluetoothSerialManager.sendMediaPacket(title, artist, imageBytes)
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        timelineTimer?.cancel()
     }
 }
