@@ -15,6 +15,7 @@ import java.io.ByteArrayOutputStream
 import androidx.core.graphics.scale
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.toColorInt
+import androidx.core.content.res.ResourcesCompat
 
 class MediaListenerService : NotificationListenerService() {
 
@@ -110,15 +111,15 @@ class MediaListenerService : NotificationListenerService() {
                         val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                             color = Color.WHITE
                             textSize = 24f
-                            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                            typeface = ResourcesCompat.getFont(this@MediaListenerService, R.font.sf_pro_display_medium)
                             textAlign = Paint.Align.CENTER
                             setShadowLayer(5f, 0f, 2f, Color.BLACK) // slight shadow for visibility
                         }
 
                         val artistPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                            color = "#CCCCCC".toColorInt() // light gray
+                            color = Color.WHITE
                             textSize = 18f
-                            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+                            typeface = ResourcesCompat.getFont(this@MediaListenerService, R.font.sf_pro_display_light)
                             textAlign = Paint.Align.CENTER
                             setShadowLayer(5f, 0f, 2f, Color.BLACK)
                         }
