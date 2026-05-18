@@ -83,17 +83,16 @@ class MediaListenerService : NotificationListenerService() {
         timelineTimer = Timer()
         timelineTimer?.scheduleAtFixedRate(object : TimerTask() {
             override fun run() {
-                Log.d(TAG, "Timer Tick")
+                if (!BluetoothSerialManager.isConnected) {
+                    return
+                }
 
                 currentController?.let { controller ->
                     val state = controller.playbackState
-                    if (state != null) {
-                        Log.d(TAG, "Sending Timeline Data. Duration: $currentTrackDuration")
+                    if (state != null && currentTrackDuration > 0) {
                         val position = state.position
-                        val isPlaying = state.state == PlaybackState.STATE_PLAYING
+                        val isPlaying = state.state == android.media.session.PlaybackState.STATE_PLAYING
                         BluetoothSerialManager.sendTimelinePacket(position, currentTrackDuration, isPlaying)
-                    } else {
-                        Log.d(TAG, "PlaybackState is NULL")
                     }
                 }
             }

@@ -25,7 +25,7 @@ object BluetoothSerialManager {
     private var bluetoothSocket: BluetoothSocket? = null
     private var outputStream: OutputStream? = null
     private var inputStream: InputStream? = null
-    private var isConnected = false
+    var isConnected = false // global
     private var audioManager: AudioManager? = null
 
     // callback which MediaListenerService listens to for seek
@@ -33,6 +33,28 @@ object BluetoothSerialManager {
 
     fun init(context: Context) {
         audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    }
+
+    @SuppressLint("MissingPermission")
+    fun autoConnect(targetDeviceName: String) {
+        val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
+            Log.e(TAG, "Bluetooth is disabled.")
+            return
+        }
+
+        val pairedDevices: Set<BluetoothDevice>? = bluetoothAdapter.bondedDevices
+        if (!pairedDevices.isNullOrEmpty()) {
+            for (device in pairedDevices) {
+                // if it finds paired device matching name passed from the button
+                if (device.name == targetDeviceName) {
+                    Log.d(TAG, "Found target: ${device.name} [${device.address}]")
+                    connectToESP32(device.address)
+                    return
+                }
+            }
+        }
+        Log.e(TAG, "Device '$targetDeviceName' not found. Please pair it first.")
     }
 
     fun connectToESP32(macAddress: String) {
