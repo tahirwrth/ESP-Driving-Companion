@@ -36,6 +36,8 @@ object BluetoothSerialManager {
         audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     }
     fun connectToESP32(macAddress: String) {
+        if (shouldLoopConnect) return // prevent duplicate threads
+
         val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
         if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) return
 

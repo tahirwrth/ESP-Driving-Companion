@@ -17,6 +17,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import kotlin.collections.isNullOrEmpty
+import android.content.Context
+import androidx.core.content.edit
 
 class MainActivity : AppCompatActivity() {
 
@@ -40,9 +42,25 @@ class MainActivity : AppCompatActivity() {
 
         val btnStart = findViewById<Button>(R.id.btnStart)
         val btnStop = findViewById<Button>(R.id.btnStop)
+        val prefs = getSharedPreferences("ESP_PREFS", Context.MODE_PRIVATE)
 
+        // short press = connect to previous device
         btnStart.setOnClickListener {
+            val savedMac = prefs.getString("SAVED_MAC", null)
+            if (savedMac != null) {
+                BluetoothSerialManager.connectToESP32(savedMac)
+                startService(Intent(this, ESP32ConnectionService::class.java))
+                Toast.makeText(this, "Connecting to saved device...", Toast.LENGTH_SHORT).show()
+            } else {
+                // if no previous device then pick an option
+                showBluetoothDeviceSelector()
+            }
+        }
+
+        // long press = select bluetooth device
+        btnStart.setOnLongClickListener {
             showBluetoothDeviceSelector()
+            true
         }
 
         btnStop.setOnClickListener {
@@ -59,19 +77,11 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("MissingPermission")
     private fun showBluetoothDeviceSelector() {
         val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
-
-        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
-            Toast.makeText(this, "Please enable Bluetooth first", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) return
 
         val pairedDevices: Set<BluetoothDevice>? = bluetoothAdapter.bondedDevices
-        if (pairedDevices.isNullOrEmpty()) {
-            Toast.makeText(this, "No paired devices found. Pair your ESP32 in settings first.", Toast.LENGTH_LONG).show()
-            return
-        }
+        if (pairedDevices.isNullOrEmpty()) return
 
-        // convert set into arrays for UI
         val deviceNames = pairedDevices.map { it.name ?: "Unknown Device" }.toTypedArray()
         val deviceMacs = pairedDevices.map { it.address }.toTypedArray()
 
@@ -81,12 +91,18 @@ class MainActivity : AppCompatActivity() {
                 val selectedName = deviceNames[which]
                 val selectedMac = deviceMacs[which]
 
-                // pass MAC address
-                BluetoothSerialManager.connectToESP32(selectedMac)
+                // save new MAC address
+                getSharedPreferences("ESP_PREFS", Context.MODE_PRIVATE)
+                    .edit {
+                        putString("SAVED_MAC", selectedMac)
+                    }
 
-                // start background service
-                val serviceIntent = Intent(this, ESP32ConnectionService::class.java)
-                startService(serviceIntent)
+                // kill old connection before starting new
+                BluetoothSerialManager.closeConnection()
+
+                // start connecting new device
+                BluetoothSerialManager.connectToESP32(selectedMac)
+                startService(Intent(this, ESP32ConnectionService::class.java))
 
                 Toast.makeText(this, "Connecting to $selectedName...", Toast.LENGTH_SHORT).show()
             }
