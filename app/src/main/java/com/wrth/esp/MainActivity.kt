@@ -48,11 +48,13 @@ class MainActivity : AppCompatActivity() {
         btnStart.setOnClickListener {
             val savedMac = prefs.getString("SAVED_MAC", null)
             if (savedMac != null) {
+                // write ALLOW flag for service
+                prefs.edit { putBoolean("ALLOW_BACKGROUND_RUN", true) }
+
                 BluetoothSerialManager.connectToESP32(savedMac)
                 startService(Intent(this, ESP32ConnectionService::class.java))
                 Toast.makeText(this, "Connecting to saved device...", Toast.LENGTH_SHORT).show()
             } else {
-                // if no previous device then pick an option
                 showBluetoothDeviceSelector()
             }
         }
@@ -64,12 +66,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnStop.setOnClickListener {
+            // write DENY flag so cant be revived
+            prefs.edit { putBoolean("ALLOW_BACKGROUND_RUN", false) }
+
             BluetoothSerialManager.closeConnection()
-
-            val serviceIntent = Intent(this, ESP32ConnectionService::class.java)
-            stopService(serviceIntent)
-
-            Log.d("MainActivity", "Stop button pressed: Service and Bluetooth radar terminated.")
+            stopService(Intent(this, ESP32ConnectionService::class.java))
+            Toast.makeText(this, "Service Killed Permanently", Toast.LENGTH_SHORT).show()
         }
     }
 

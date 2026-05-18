@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import java.util.Timer
@@ -18,12 +19,19 @@ class ESP32ConnectionService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+
+        val prefs = getSharedPreferences("ESP_PREFS", Context.MODE_PRIVATE)
+        val allowRun = prefs.getBoolean("ALLOW_BACKGROUND_RUN", false)
+
+        if (!allowRun) {
+            stopSelf() // stop when pressed stop
+            return
+        }
+
         startForegroundServiceNotification()
         startUpdateLoop()
 
-        val prefs = getSharedPreferences("ESP_PREFS", Context.MODE_PRIVATE)
         val savedMac = prefs.getString("SAVED_MAC", null)
-
         if (savedMac != null) {
             BluetoothSerialManager.connectToESP32(savedMac)
         }
@@ -77,7 +85,17 @@ class ESP32ConnectionService : Service() {
             .setSmallIcon(android.R.drawable.ic_media_play)
             .build()
 
-        startForeground(1, notification)
+        // android 12+ background exception
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(1, notification)
+            } else {
+                startForeground(1, notification)
+            }
+        } catch (e: Exception) {
+            // if android denies background start then stop crash loop
+            stopSelf()
+        }
     }
 
     override fun onDestroy() {
