@@ -55,6 +55,7 @@ object BleManager {
         isConnected = false
         isConnecting = false
         pingTimer?.cancel()
+        GpsManager.stopTracking()
         bluetoothGatt?.disconnect()
         bluetoothGatt?.close()
         bluetoothGatt = null
@@ -75,6 +76,9 @@ object BleManager {
                 }
             }
         }, 500, 500)
+
+        // start gps tracking only when connected
+        appContext?.let { GpsManager.startTracking(it) }
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
