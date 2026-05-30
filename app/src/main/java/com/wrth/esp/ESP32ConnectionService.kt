@@ -12,10 +12,10 @@ import androidx.core.app.NotificationCompat
 import java.util.Timer
 import java.util.TimerTask
 
+// sticky service for when connection activated
 class ESP32ConnectionService : Service() {
 
     private var updateTimer: Timer? = null
-    private var lastSentTitle: String = ""
 
     override fun onCreate() {
         super.onCreate()
@@ -24,7 +24,7 @@ class ESP32ConnectionService : Service() {
         val allowRun = prefs.getBoolean("ALLOW_BACKGROUND_RUN", false)
 
         if (!allowRun) {
-            stopSelf() // stop when pressed stop
+            stopSelf()
             return
         }
 
@@ -33,7 +33,7 @@ class ESP32ConnectionService : Service() {
 
         val savedMac = prefs.getString("SAVED_MAC", null)
         if (savedMac != null) {
-            BluetoothSerialManager.connectToESP32(savedMac)
+            BleManager.connectToESP32(savedMac)
         }
     }
 
@@ -46,19 +46,7 @@ class ESP32ConnectionService : Service() {
         updateTimer = Timer()
         updateTimer?.schedule(object : TimerTask() {
             override fun run() {
-                if (!BluetoothSerialManager.isConnected) return
-
-                val newTitle = MediaDataStore.currentTitle
-                val newArtist = MediaDataStore.currentArtist
-
-                if (newTitle != lastSentTitle && newTitle != "Unknown") {
-                    lastSentTitle = newTitle
-                    BluetoothSerialManager.sendMediaPacket(
-                        newTitle,
-                        newArtist,
-                        MediaDataStore.currentArtBytes
-                    )
-                }
+                if (!BleManager.isConnected) return
 
                 val controller = MediaDataStore.currentController
                 val state = controller?.playbackState
@@ -67,7 +55,7 @@ class ESP32ConnectionService : Service() {
                 if (state != null && duration > 0) {
                     val position = state.position
                     val isPlaying = state.state == android.media.session.PlaybackState.STATE_PLAYING
-                    BluetoothSerialManager.sendTimelinePacket(position, duration, isPlaying)
+                    BleManager.sendTimelinePacket(position, duration, isPlaying)
                 }
             }
         }, 0, 1000)
@@ -81,19 +69,13 @@ class ESP32ConnectionService : Service() {
 
         val notification: Notification = NotificationCompat.Builder(this, channelId)
             .setContentTitle("ESP32 Screen Sync")
-            .setContentText("Connected and running...")
+            .setContentText("BLE 5.0 Link Active...")
             .setSmallIcon(android.R.drawable.ic_media_play)
             .build()
 
-        // android 12+ background exception
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(1, notification)
-            } else {
-                startForeground(1, notification)
-            }
+            startForeground(1, notification)
         } catch (e: Exception) {
-            // if android denies background start then stop crash loop
             stopSelf()
         }
     }
@@ -101,7 +83,6 @@ class ESP32ConnectionService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         updateTimer?.cancel()
-        lastSentTitle = ""
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

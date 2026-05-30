@@ -1,183 +1,224 @@
 package com.wrth.esp
 
 import android.content.ComponentName
+import android.graphics.*
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
+import android.media.session.PlaybackState
+import android.renderscript.Allocation
+import android.renderscript.Element
+import android.renderscript.RenderScript
+import android.renderscript.ScriptIntrinsicBlur
 import android.service.notification.NotificationListenerService
+import android.service.notification.StatusBarNotification
 import android.util.Log
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Typeface
-import java.io.ByteArrayOutputStream
-import androidx.core.graphics.scale
-import androidx.core.graphics.createBitmap
-import androidx.core.graphics.toColorInt
 import androidx.core.content.res.ResourcesCompat
+import java.io.ByteArrayOutputStream
+import java.util.Locale
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.scale
 
 class MediaListenerService : NotificationListenerService() {
 
-    private val TAG = "MediaListenerService"
     private lateinit var mediaSessionManager: MediaSessionManager
-    private var currentController: MediaController? = null
+    private val TAG = "MediaListenerService"
 
-//    private val mediaCallback = object : MediaController.Callback() {
-//        override fun onMetadataChanged(metadata: MediaMetadata?) {
-//            metadata?.let {
-//                val title = it.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "Unknown"
-//                val artist = it.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: "Unknown"
-//                val albumArt = it.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
-//                    ?: it.getBitmap(MediaMetadata.METADATA_KEY_ART)
-//                val duration = it.getLong(MediaMetadata.METADATA_KEY_DURATION)
-//
-//                MediaDataStore.currentTitle = title
-//                MediaDataStore.currentArtist = artist
-//                MediaDataStore.currentDuration = duration
-//
-//                var imageBytes = ByteArray(0)
-//                albumArt?.let { bitmap ->
-//                    val scaled = bitmap.scale(200, 200)
-//                    val out = ByteArrayOutputStream()
-//                    scaled.compress(Bitmap.CompressFormat.JPEG, 75, out)
-//                    imageBytes = out.toByteArray()
-//                }
-//                MediaDataStore.currentArtBytes = imageBytes
-//            }
-//        }
+    override fun onCreate() {
+        super.onCreate()
+        mediaSessionManager = getSystemService(MediaSessionManager::class.java)
+        val componentName = ComponentName(this, MediaListenerService::class.java)
+        mediaSessionManager.addOnActiveSessionsChangedListener(
+            { controllers -> updateActiveController(controllers) },
+            componentName
+        )
+        updateActiveController(mediaSessionManager.getActiveSessions(componentName))
+    }
 
-    private val mediaCallback = object : MediaController.Callback() {
-        private val mediaCallback = object : MediaController.Callback() {
-            override fun onMetadataChanged(metadata: MediaMetadata?) {
-                metadata?.let {
-                    val title = it.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "Unknown"
-                    val artist = it.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: "Unknown"
-                    val albumArt = it.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
-                        ?: it.getBitmap(MediaMetadata.METADATA_KEY_ART)
-                    val duration = it.getLong(MediaMetadata.METADATA_KEY_DURATION)
+    // scrape maps notification from phone, catered for G Maps
+    override fun onNotificationPosted(sbn: StatusBarNotification) {
+        super.onNotificationPosted(sbn)
+        val packageName = sbn.packageName
 
-                    MediaDataStore.currentTitle = title
-                    MediaDataStore.currentArtist = artist
-                    MediaDataStore.currentDuration = duration
+        if (packageName == "com.google.android.apps.maps") {
+            val extras = sbn.notification.extras
 
-                    var imageBytes = ByteArray(0)
-                    albumArt?.let { bitmap ->
-                        // canvas matching ESP screen resolution
-                        val finalWidth = 360
-                        val finalHeight = 360
-                        val finalBitmap = createBitmap(finalWidth, finalHeight)
-                        val canvas = Canvas(finalBitmap)
+            val title = extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString() ?: ""
+            val text = extras.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString() ?: ""
 
-                        // background blur
-                        val tinyBg = bitmap.scale(32, 32)
-                        val largeBlurredBg = tinyBg.scale(400, 400)
+            if (title.isBlank() && text.isBlank()) return
 
-                        val bgLeft = (finalWidth - 400) / 2f
-                        val bgTop = (finalHeight - 400) / 2f
-                        val bgPaint = Paint().apply { alpha = 178 }
-                        canvas.drawBitmap(largeBlurredBg, bgLeft, bgTop, bgPaint)
-                        canvas.drawColor(Color.argb(70, 0, 0, 0)) // darken overlay
+            val fullStr = "$title $text".lowercase(Locale.ROOT)
 
-                        // adjustable UI vars
-                        val coverSize = 140
-                        val coverYPosition = 50f
-
-                        // init cover art
-                        val centerArt = bitmap.scale(coverSize, coverSize)
-                        val centerLeft = (finalWidth - coverSize) / 2f
-                        val centerTop = coverYPosition
-
-                        // shadow
-                        val shadowPaint = Paint().apply {
-                            setShadowLayer(15f, 0f, 8f, Color.BLACK)
-                            isAntiAlias = true
-                        }
-                        canvas.drawRect(
-                            centerLeft,
-                            centerTop,
-                            centerLeft + coverSize,
-                            centerTop + coverSize,
-                            shadowPaint
-                        )
-
-                        // draw cover art
-                        canvas.drawBitmap(centerArt, centerLeft, centerTop, null)
-
-                        // name and artist text
-                        canvas.drawRect(centerLeft, centerTop, centerLeft + coverSize, centerTop + coverSize, shadowPaint)
-                        canvas.drawBitmap(centerArt, centerLeft, centerTop, null)
-
-                        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                            color = Color.WHITE
-                            textSize = 24f
-                            typeface = ResourcesCompat.getFont(this@MediaListenerService, R.font.sf_pro_display_medium)
-                            textAlign = Paint.Align.CENTER
-                            setShadowLayer(5f, 0f, 2f, Color.BLACK) // slight shadow for visibility
-                        }
-
-                        val artistPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                            color = Color.WHITE
-                            textSize = 18f
-                            typeface = ResourcesCompat.getFont(this@MediaListenerService, R.font.sf_pro_display_light)
-                            textAlign = Paint.Align.CENTER
-                            setShadowLayer(5f, 0f, 2f, Color.BLACK)
-                        }
-
-                        // X is center 180
-                        // Y is relative to bottom of cover art
-                        val textBaseY = coverYPosition + coverSize
-
-                        // truncate text is too long
-                        val displayTitle = if (title.length > 25) title.take(22) + "..." else title
-                        val displayArtist = if (artist.length > 30) artist.take(27) + "..." else artist
-
-                        canvas.drawText(displayTitle, 180f, textBaseY + 50f, titlePaint)
-                        canvas.drawText(displayArtist, 180f, textBaseY + 80f, artistPaint)
-
-                        // compress to jpeg as final
-                        val out = ByteArrayOutputStream()
-                        finalBitmap.compress(Bitmap.CompressFormat.JPEG, 75, out)
-                        imageBytes = out.toByteArray()
-                    }
-
-                    MediaDataStore.currentArtBytes = imageBytes
-                }
+            // alert tracking
+            if (fullStr.contains("police") || fullStr.contains("camera") || fullStr.contains("traffic") || fullStr.contains("hazard")) {
+                Log.w(TAG, "NAV_DEBUG: POLICE/HAZARD DETECTED! Sending Alert.")
+                BleManager.sendAlertPacket("POLICE")
+                return
             }
+
+            parseAndSendNavigationData(title, text, fullStr)
         }
     }
 
-    override fun onListenerConnected() {
-        super.onListenerConnected()
-        Log.d(TAG, "LISTENER CONNECTED TO OS")
-        mediaSessionManager = getSystemService(MEDIA_SESSION_SERVICE) as MediaSessionManager
-        val componentName = ComponentName(this, MediaListenerService::class.java)
+    // get and send navigation to esp32
+    private fun parseAndSendNavigationData(title: String, text: String, fullStr: String) {
+        // get distance
+        var distance = title
+        if (distance.isEmpty() || distance.lowercase(Locale.ROOT).contains("navigation")) {
+            val distRegex = Regex("\\b(\\d+(?:\\.\\d+)?\\s*(m|km|ft|mi|yd|yds|yards|meters|miles))\\b", RegexOption.IGNORE_CASE)
+            distance = distRegex.find(fullStr)?.value ?: "--"
+        }
 
-        try {
-            val activeSessions = mediaSessionManager.getActiveSessions(componentName)
-            if (activeSessions.isNotEmpty()) {
-                Log.d(TAG, "FOUND ACTIVE MEDIA: ${activeSessions[0].packageName}")
-                attachToController(activeSessions[0])
-            } else {
-                Log.d(TAG, "NO ACTIVE MEDIA FOUND ON STARTUP")
+        // get roundabout exit
+        val exitRegex = Regex("(\\d+)(?:st|nd|rd|th)\\s+exit", RegexOption.IGNORE_CASE)
+        val exitNumber = exitRegex.find(fullStr)?.groupValues?.get(1) ?: ""
+
+        // wip: get turn
+        val turn = when {
+            Regex("roundabout|traffic circle|\\bcircle\\b|◷|⨀").containsMatchIn(fullStr) -> "ROUND"
+            Regex("u-turn|u turn|make a u|↶|↺|↻|↷").containsMatchIn(fullStr) -> "U-TURN"
+            Regex("keep left|slight left|↖|⮨").containsMatchIn(fullStr) -> "KEEP L"
+            Regex("keep right|slight right|↗|⮩").containsMatchIn(fullStr) -> "KEEP R"
+            Regex("\\bleft\\b|←|↰|⟵").containsMatchIn(fullStr) -> "LEFT"
+            Regex("\\bright\\b|→|↱|⟶").containsMatchIn(fullStr) -> "RIGHT"
+            Regex("\\bexit\\b").containsMatchIn(fullStr) -> "KEEP L" // UK road specific (exit to the left)
+            else -> "STRAIGHT"
+        }
+
+        // extracts street name from verbs/adjectives
+        var street = text
+        val removePrefixes = listOf("towards ", "turn left onto ", "turn right onto ", "keep left onto ", "keep right onto ", "onto ", "merge onto ")
+
+        for (prefix in removePrefixes) {
+            if (street.lowercase(Locale.ROOT).startsWith(prefix)) {
+                street = street.substring(prefix.length)
+                break
             }
+        }
 
-            mediaSessionManager.addOnActiveSessionsChangedListener({ controllers ->
-                if (!controllers.isNullOrEmpty()) attachToController(controllers[0])
-            }, componentName)
-        } catch (e: SecurityException) {}
+        street = street.split(" ").joinToString(" ") { it.replaceFirstChar { char -> if (char.isLowerCase()) char.titlecase(Locale.ROOT) else char.toString() } }
+        street = street.replace(Regex("[^a-zA-Z0-9 ]"), "").trim().take(22)
+
+        if (street.isBlank()) street = "Follow Route"
+
+        Log.w(TAG, "NAV_DEBUG: Sending -> Turn: [$turn] Dist: [$distance] Street: [$street] Exit: [$exitNumber]")
+
+        BleManager.sendAlertPacket("CLEAR")
+        Thread.sleep(100)
+        BleManager.sendNavPacket(turn, distance, "$street|$exitNumber")
     }
 
-    private fun attachToController(controller: MediaController) {
-        currentController?.unregisterCallback(mediaCallback)
-        currentController = controller
-        currentController?.registerCallback(mediaCallback)
-
-        MediaDataStore.currentController = controller
-        mediaCallback.onMetadataChanged(controller.metadata)
+    private fun updateActiveController(controllers: List<MediaController>?) {
+        val activeController = controllers?.firstOrNull() ?: return
+        MediaDataStore.currentController = activeController
+        activeController.registerCallback(mediaCallback)
+        mediaCallback.onMetadataChanged(activeController.metadata)
+        mediaCallback.onPlaybackStateChanged(activeController.playbackState)
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
+    // blur background of image
+    private fun blurBitmap(bitmap: Bitmap, radius: Float): Bitmap {
+        val outputBitmap = bitmap.copy(bitmap.config ?: Bitmap.Config.ARGB_8888, true)
+        val rs = RenderScript.create(this)
+        val input = Allocation.createFromBitmap(rs, outputBitmap)
+        val output = Allocation.createTyped(rs, input.type)
+        val script = ScriptIntrinsicBlur.create(rs, Element.U8_4(rs))
+
+        script.setRadius(radius.coerceIn(1f, 25f))
+        script.setInput(input)
+        script.forEach(output)
+        output.copyTo(outputBitmap)
+
+        rs.destroy()
+        return outputBitmap
+    }
+
+    private val mediaCallback = object : MediaController.Callback() {
+        override fun onPlaybackStateChanged(state: PlaybackState?) {
+            state?.let {
+                MediaDataStore.currentPosition = it.position
+                MediaDataStore.isPlaying = it.state == PlaybackState.STATE_PLAYING
+            }
+        }
+
+        // when song is changed
+        override fun onMetadataChanged(metadata: MediaMetadata?) {
+            metadata?.let {
+                val title = it.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "Unknown"
+                val artist = it.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: "Unknown"
+                val albumArt = it.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+                    ?: it.getBitmap(MediaMetadata.METADATA_KEY_ART)
+                val duration = it.getLong(MediaMetadata.METADATA_KEY_DURATION)
+
+                MediaDataStore.currentTitle = title
+                MediaDataStore.currentArtist = artist
+                MediaDataStore.currentDuration = duration
+
+
+                // creates whole image including song name, artist, album art, background for esp32 to display
+                albumArt?.let { bitmap ->
+                    val finalWidth = 360
+                    val finalHeight = 360
+                    val finalBitmap = createBitmap(finalWidth, finalHeight)
+                    val canvas = Canvas(finalBitmap)
+
+                    val bgBitmap = bitmap.scale(400, 400)
+                    val blurredBg = blurBitmap(bgBitmap, 25f)
+                    val bgLeft = (finalWidth - 400) / 2f
+                    val bgTop = (finalHeight - 400) / 2f
+                    val bgPaint = Paint().apply { alpha = 178 }
+                    canvas.drawBitmap(blurredBg, bgLeft, bgTop, bgPaint)
+                    canvas.drawColor(Color.argb(70, 0, 0, 0))
+
+                    val coverSize = 170
+                    val coverYPosition = 45f
+
+                    val centerArt = bitmap.scale(coverSize, coverSize)
+                    val centerLeft = (finalWidth - coverSize) / 2f
+                    val centerTop = coverYPosition
+
+                    val shadowPaint = Paint().apply {
+                        setShadowLayer(15f, 0f, 8f, Color.BLACK)
+                        isAntiAlias = true
+                    }
+                    canvas.drawRect(centerLeft, centerTop, centerLeft + coverSize, centerTop + coverSize, shadowPaint)
+                    canvas.drawBitmap(centerArt, centerLeft, centerTop, null)
+
+                    val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = Color.WHITE
+                        textSize = 24f
+                        typeface = ResourcesCompat.getFont(this@MediaListenerService, R.font.sf_pro_display_medium)
+                        textAlign = Paint.Align.CENTER
+                        setShadowLayer(5f, 0f, 2f, Color.BLACK)
+                    }
+
+                    val artistPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = Color.WHITE
+                        textSize = 18f
+                        typeface = ResourcesCompat.getFont(this@MediaListenerService, R.font.sf_pro_display_light)
+                        textAlign = Paint.Align.CENTER
+                        setShadowLayer(5f, 0f, 2f, Color.BLACK)
+                    }
+
+                    val textBaseY = coverYPosition + coverSize
+                    val displayTitle = if (title.length > 25) title.take(22) + "..." else title
+                    val displayArtist = if (artist.length > 30) artist.take(27) + "..." else artist
+
+                    canvas.drawText(displayTitle, 180f, textBaseY + 40f, titlePaint)
+                    canvas.drawText(displayArtist, 180f, textBaseY + 70f, artistPaint)
+
+                    val stream = ByteArrayOutputStream()
+                    finalBitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream)
+                    val jpgData = stream.toByteArray()
+                    val currentHash = jpgData.contentHashCode()
+
+                    MediaDataStore.currentArtBytes = jpgData
+
+                    BleManager.latestImageData = jpgData
+                    BleManager.latestImageHash = currentHash
+                }
+            }
+        }
     }
 }

@@ -2,23 +2,23 @@ package com.wrth.esp
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.AlertDialog
 import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothDevice
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanResult
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
-import android.util.Log
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
-import kotlin.collections.isNullOrEmpty
-import android.content.Context
-import androidx.core.content.edit
 
 class MainActivity : AppCompatActivity() {
 
@@ -26,94 +26,102 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        BluetoothSerialManager.init(this)
+        // 1. Initialize BLE with safe context
+        BleManager.init(applicationContext)
 
-        // android 12+ runtime bluetooth permission prompt
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 100)
-            }
-        }
-
-        // notification access check
-        if (!isNotificationServiceEnabled()) {
-            startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
-        }
+        // 2. Immediate Permission Check
+        checkAndRequestPermissions()
 
         val btnStart = findViewById<Button>(R.id.btnStart)
         val btnStop = findViewById<Button>(R.id.btnStop)
         val prefs = getSharedPreferences("ESP_PREFS", Context.MODE_PRIVATE)
 
-        // short press = connect to previous device
         btnStart.setOnClickListener {
             val savedMac = prefs.getString("SAVED_MAC", null)
             if (savedMac != null) {
-                // write ALLOW flag for service
-                prefs.edit { putBoolean("ALLOW_BACKGROUND_RUN", true) }
-
-                BluetoothSerialManager.connectToESP32(savedMac)
-                startService(Intent(this, ESP32ConnectionService::class.java))
-                Toast.makeText(this, "Connecting to saved device...", Toast.LENGTH_SHORT).show()
+                prefs.edit().putBoolean("ALLOW_BACKGROUND_RUN", true).apply()
+                BleManager.connectToESP32(savedMac)
+                startForegroundServiceSafe()
             } else {
                 showBluetoothDeviceSelector()
             }
         }
 
-        // long press = select bluetooth device
         btnStart.setOnLongClickListener {
             showBluetoothDeviceSelector()
             true
         }
 
         btnStop.setOnClickListener {
-            // write DENY flag so cant be revived
-            prefs.edit { putBoolean("ALLOW_BACKGROUND_RUN", false) }
-
-            BluetoothSerialManager.closeConnection()
+            prefs.edit().putBoolean("ALLOW_BACKGROUND_RUN", false).apply()
+            BleManager.closeConnection()
             stopService(Intent(this, ESP32ConnectionService::class.java))
-            Toast.makeText(this, "Service Killed Permanently", Toast.LENGTH_SHORT).show()
         }
     }
 
-    // show list of paired devices
-    @SuppressLint("MissingPermission")
-    private fun showBluetoothDeviceSelector() {
-        val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
-        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) return
+    private fun checkAndRequestPermissions() {
+        val permissions = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            permissions.add(Manifest.permission.BLUETOOTH_SCAN)
+            permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
 
-        val pairedDevices: Set<BluetoothDevice>? = bluetoothAdapter.bondedDevices
-        if (pairedDevices.isNullOrEmpty()) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            permissions.add(Manifest.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE)
+        }
 
-        val deviceNames = pairedDevices.map { it.name ?: "Unknown Device" }.toTypedArray()
-        val deviceMacs = pairedDevices.map { it.address }.toTypedArray()
-
-        AlertDialog.Builder(this)
-            .setTitle("Select ESP32 Device")
-            .setItems(deviceNames) { _, which ->
-                val selectedName = deviceNames[which]
-                val selectedMac = deviceMacs[which]
-
-                // save new MAC address
-                getSharedPreferences("ESP_PREFS", Context.MODE_PRIVATE)
-                    .edit {
-                        putString("SAVED_MAC", selectedMac)
-                    }
-
-                // kill old connection before starting new
-                BluetoothSerialManager.closeConnection()
-
-                // start connecting new device
-                BluetoothSerialManager.connectToESP32(selectedMac)
-                startService(Intent(this, ESP32ConnectionService::class.java))
-
-                Toast.makeText(this, "Connecting to $selectedName...", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+        val missing = permissions.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isNotEmpty()) {
+            requestPermissions(missing.toTypedArray(), 101)
+        }
     }
 
-    private fun isNotificationServiceEnabled(): Boolean {
-        val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
-        return flat != null && flat.contains(packageName)
+    @SuppressLint("MissingPermission")
+    private fun showBluetoothDeviceSelector() {
+        val scanner = BluetoothAdapter.getDefaultAdapter()?.bluetoothLeScanner
+        if (scanner == null) {
+            Toast.makeText(this, "Enable Bluetooth First!", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val deviceNames = mutableListOf<String>()
+        val deviceMacs = mutableListOf<String>()
+        val adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, deviceNames)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Scanning for Car Screen...")
+            .setAdapter(adapter) { _, which ->
+                val mac = deviceMacs[which]
+                getSharedPreferences("ESP_PREFS", Context.MODE_PRIVATE).edit()
+                    .putString("SAVED_MAC", mac).putBoolean("ALLOW_BACKGROUND_RUN", true).apply()
+                BleManager.connectToESP32(mac)
+                startForegroundServiceSafe()
+            }.show()
+
+        val scanCallback = object : ScanCallback() {
+            override fun onScanResult(callbackType: Int, result: ScanResult) {
+                val name = result.device.name ?: "Unknown"
+                val mac = result.device.address
+                if (!deviceMacs.contains(mac)) {
+                    deviceNames.add(if (name == "Guition-Remote") "⭐ $name" else name)
+                    deviceMacs.add(mac)
+                    adapter.notifyDataSetChanged()
+                }
+            }
+        }
+
+        scanner.startScan(scanCallback)
+        Handler(Looper.getMainLooper()).postDelayed({ scanner.stopScan(scanCallback) }, 5000)
+    }
+
+    private fun startForegroundServiceSafe() {
+        val intent = Intent(this, ESP32ConnectionService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
     }
 }
