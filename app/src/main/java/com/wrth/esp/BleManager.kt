@@ -244,4 +244,14 @@ object BleManager {
         val cmdChar = service.getCharacteristic(COMMAND_CHAR_UUID) ?: return
         writeCharacteristicChunk(gatt, cmdChar, cmd.toByteArray())
     }
+
+    // gps data sender for speed limit / cameras
+    fun sendGpsPacket(currentSpeed: Int, speedLimit: Int, cameraDist: Int) {
+        if (!isConnected || bluetoothGatt == null) return
+        val cmd = "G:$currentSpeed|$speedLimit|$cameraDist"
+        val gatt = bluetoothGatt ?: return
+        val service = gatt.getService(SERVICE_UUID) ?: return
+        val cmdChar = service.getCharacteristic(COMMAND_CHAR_UUID) ?: return
+        writeCharacteristicChunk(gatt, cmdChar, cmd.toByteArray())
+    }
 }
