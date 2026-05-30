@@ -64,7 +64,7 @@ object BleManager {
     private fun startPingTimer() {
         pingTimer?.cancel()
         pingTimer = Timer()
-        pingTimer?.scheduleAtFixedRate(object : TimerTask() {
+        pingTimer?.schedule(object : TimerTask() {
             override fun run() {
                 if (isConnected && bluetoothGatt != null && !isTransferring && latestImageHash != 0) {
                     val cmd = "H:$latestImageHash"
