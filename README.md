@@ -1,4 +1,4 @@
-# ESP Media Viewer
+# ESP Driving Companion
 
 A comprehensive driving companion device for Android, designed for in-car usage.
 
