@@ -1,15 +1,23 @@
 esphome:
   name: jc
   platformio_options:
+    lib_ldf_mode: deep+
     board_build.flash_mode: dio
     board_build.f_flash: 80000000L
     board_build.f_cpu: 240000000L
+    lib_deps:
+      - "https://github.com/bitbank2/JPEGDEC.git#1.2.8"
 
 esp32:
   board: esp32-s3-devkitc-1
   flash_size: 16MB
   framework:
     type: esp-idf
+    advanced:
+      include_builtin_idf_components: ["fatfs", "spiffs", "vfs"]
+      disable_vfs_support_termios: false
+      disable_vfs_support_select: false
+      disable_vfs_support_dir: false
     sdkconfig_options:
       CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
       CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
@@ -23,6 +31,7 @@ esp32:
       CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_INTERNAL: "y"
       CONFIG_ESP_TASK_WDT_TIMEOUT_S: "20"
       CONFIG_ESP_HID_DEVICE_ENABLED: "y"
+      CONFIG_FATFS_LFN_STACK: "y"
 
 psram:
   mode: octal
@@ -32,7 +41,7 @@ psram:
 font:
   - file: "gfonts://Roboto@700"
     id: font_large
-    size: 60
+    size: 120
   - file: "gfonts://Roboto@700"
     id: font_medium
     size: 40
@@ -44,20 +53,38 @@ external_components:
   - source:
       type: local
       path: components
-    components: [ ble_remote ]
+    components: [ ble_remote, sd_mmc_card, sd_file_server ]
+    # components: [ ble_remote ]
 
 ble_remote:
   id: my_ble_remote
+  sd_card_id: sd_card
+
+sd_mmc_card:
+  id: sd_card
+  mode_1bit: false
+  format_if_mount_failed: false
+  clk_pin: 3
+  cmd_pin: 4
+  data0_pin: 2
+  data1_pin: 1
+  data2_pin: 6
+  data3_pin: 5
+
+web_server:
+sd_file_server:
+  id: file_server
+  url_prefix: "file"
+  root_path: "/"
+  enable_deletion: true
+  enable_download: true
+  enable_upload: true
 
 logger:
 
-api:
-  encryption:
-    key: ""
-
 ota:
   - platform: esphome
-    password: ""
+    password: "MySuperSecretKey123!"
 
 wifi:
   ssid: !secret wifi_ssid
@@ -86,7 +113,7 @@ display:
     bus_mode: quad
     spi_id: display_qspi
     model: JC3636W518V2
-    data_rate: 40MHz
+    data_rate: 80MHz
     rotation: 180
     dimensions:
       height: 360
@@ -94,10 +121,13 @@ display:
     auto_clear_enabled: false
     invert_colors: true 
     color_order: rgb
+    update_interval: 0.2s
     lambda: |-
       int current_page = id(my_ble_remote).get_page();
       
-      // page 0 - media player
+      uint16_t *src_buf = id(my_ble_remote).get_display_buffer();
+
+      // PAGE 0 - MEDIA PLAYER
 
       if (current_page == 0) {
           uint16_t *buffer = id(my_ble_remote).get_display_buffer();
@@ -130,13 +160,13 @@ display:
           }
       } 
 
-      // page 1 - navigation
+      // PAGE 1 - NAVIGATION
 
       else if (current_page == 1) {
           // background alert colours
           if (id(my_ble_remote).get_alert_active()) {
               it.fill(Color(0, 0, 150)); 
-              it.printf(180, 35, id(font_small), TextAlign::CENTER, "POLICE / HAZARD AHEAD!");
+              it.printf(180, 35, id(font_small), TextAlign::CENTER, "POLICE / HAZARD AHEAD");
           } else {
               it.fill(Color::BLACK);
           }
@@ -150,64 +180,64 @@ display:
           
           if (turn_type == "STRAIGHT") {
               for(int i = -3; i <= 3; i++) {
-                  it.line(180 + i, 195, 180 + i, 120, arrow_color); // Stem
-                  it.line(180, 120, 165 + i, 140, arrow_color);     // Left Head
-                  it.line(180, 120, 195 + i, 140, arrow_color);     // Right Head
+                  it.line(180 + i, 195, 180 + i, 120, arrow_color);
+                  it.line(180, 120, 165 + i, 140, arrow_color);
+                  it.line(180, 120, 195 + i, 140, arrow_color);
               }
           }
           else if (turn_type == "LEFT") {
               for(int i = -3; i <= 3; i++) {
-                  it.line(180 + i, 195, 180 + i, 155, arrow_color); // Upward stem
-                  it.line(180, 155 + i, 135, 155 + i, arrow_color); // Leftward bend
-                  it.line(135, 155, 155, 135 + i, arrow_color);     // Upper arrow edge
-                  it.line(135, 155, 155, 175 + i, arrow_color);     // Lower arrow edge
+                  it.line(180 + i, 195, 180 + i, 155, arrow_color);
+                  it.line(180, 155 + i, 135, 155 + i, arrow_color);
+                  it.line(135, 155, 155, 135 + i, arrow_color);
+                  it.line(135, 155, 155, 175 + i, arrow_color);
               }
           }
           else if (turn_type == "RIGHT") {
               for(int i = -3; i <= 3; i++) {
-                  it.line(180 + i, 195, 180 + i, 155, arrow_color); // Upward stem
-                  it.line(180, 155 + i, 225, 155 + i, arrow_color); // Rightward bend
-                  it.line(225, 155, 205, 135 + i, arrow_color);     // Upper arrow edge
-                  it.line(225, 155, 205, 175 + i, arrow_color);     // Lower arrow edge
+                  it.line(180 + i, 195, 180 + i, 155, arrow_color);
+                  it.line(180, 155 + i, 225, 155 + i, arrow_color);
+                  it.line(225, 155, 205, 135 + i, arrow_color);
+                  it.line(225, 155, 205, 175 + i, arrow_color);
               }
           }
           else if (turn_type == "KEEP L") {
               for(int i = -3; i <= 3; i++) {
-                  it.line(180 + i, 195, 145 + i, 130, arrow_color); // Angled Left Stem
-                  it.line(145, 130, 145, 155 + i, arrow_color);     // Head down
-                  it.line(145, 130, 170 + i, 130, arrow_color);     // Head right
+                  it.line(180 + i, 195, 145 + i, 130, arrow_color);
+                  it.line(145, 130, 145, 155 + i, arrow_color);
+                  it.line(145, 130, 170 + i, 130, arrow_color);
               }
           }
           else if (turn_type == "KEEP R") {
               for(int i = -3; i <= 3; i++) {
-                  it.line(180 + i, 195, 215 + i, 130, arrow_color); // Angled Right Stem
-                  it.line(215, 130, 215, 155 + i, arrow_color);     // Head down
-                  it.line(215, 130, 190 + i, 130, arrow_color);     // Head left
+                  it.line(180 + i, 195, 215 + i, 130, arrow_color);
+                  it.line(215, 130, 215, 155 + i, arrow_color);
+                  it.line(215, 130, 190 + i, 130, arrow_color);
               }
           }
           else if (turn_type == "U-TURN") {
               for(int i = -3; i <= 3; i++) {
-                  it.line(195 + i, 195, 195 + i, 145, arrow_color); // Right rising side
-                  it.line(195, 145 + i, 165, 145 + i, arrow_color); // Top horizontal bridge
-                  it.line(165 + i, 145, 165 + i, 175, arrow_color); // Left dropping side
-                  it.line(165, 175, 150 + i, 155, arrow_color);     // Arrow barb left
-                  it.line(165, 175, 180 + i, 155, arrow_color);     // Arrow barb right
+                  it.line(195 + i, 195, 195 + i, 145, arrow_color);
+                  it.line(195, 145 + i, 165, 145 + i, arrow_color);
+                  it.line(165 + i, 145, 165 + i, 175, arrow_color);
+                  it.line(165, 175, 150 + i, 155, arrow_color);
+                  it.line(165, 175, 180 + i, 155, arrow_color);
               }
           }
           else if (turn_type == "ROUND") {
-              // Vector Roundabout Ring
+              // vector roundabout ring
               for(int r = 22; r <= 27; r++) {
                   it.circle(180, 155, r, arrow_color);
               }
-              // Bottom Entry Vector
+              // bottom entry vector
               for(int i = -3; i <= 3; i++) {
                   it.line(180 + i, 195, 180 + i, 182, arrow_color);
               }
-              // Universal exit marker at top structure out from ring
+              // exit marker at top
               for(int i = -3; i <= 3; i++) {
-                  it.line(180 + i, 128, 180 + i, 110, arrow_color); // Exit path
-                  it.line(180, 110, 168 + i, 125, arrow_color);     // Left cap
-                  it.line(180, 110, 192 + i, 125, arrow_color);     // Right cap
+                  it.line(180 + i, 128, 180 + i, 110, arrow_color);
+                  it.line(180, 110, 168 + i, 125, arrow_color);
+                  it.line(180, 110, 192 + i, 125, arrow_color);
               }
           }
           
@@ -223,6 +253,64 @@ display:
           }
       }
 
+      // PAGE 2 - SPEED
+
+      else if (current_page == 2) {
+          // background alert colours
+          if (id(my_ble_remote).get_alert_active()) {
+              it.fill(Color(0, 0, 150)); 
+              it.printf(180, 35, id(font_small), TextAlign::CENTER, "POLICE / HAZARD AHEAD");
+          } else {
+              it.fill(Color::BLACK);
+          }
+
+          // speed limit sign (top middle)
+          int spd_limit = id(my_ble_remote).get_speed_limit();
+          if (spd_limit > 0) {
+              it.filled_circle(180, 95, 45, Color::WHITE);
+              for (int r = 40; r <= 45; r++) {
+                  it.circle(180, 95, r, Color(255, 0, 0));
+              }
+              it.printf(180, 75, id(font_medium), Color::BLACK, TextAlign::CENTER, "%d", spd_limit);
+          }
+
+          // current speed (middle)
+          int spd = id(my_ble_remote).get_current_speed();
+          it.printf(180, 175, id(font_large), TextAlign::CENTER, "%d", spd);
+          it.printf(180, 240, id(font_small), TextAlign::CENTER, "MPH");
+
+          // distance from next camera (bottom)
+          int cam_dist = id(my_ble_remote).get_camera_distance();
+          if (cam_dist >= 0) {
+              it.printf(180, 305, id(font_small), TextAlign::CENTER, "Camera: %d ft", cam_dist);
+          }
+      }
+
+      // PAGE 3 - VIDEO PLAYER
+      // experimental MJPEG player from SD card
+
+      else if (current_page == 3) {
+          if (src_buf != nullptr) {
+            int cx = it.get_clipping().x;
+            int cy = it.get_clipping().y;
+            int cw = it.get_clipping().w;
+            int ch = it.get_clipping().h;
+
+            int x_start = std::max(0, cx);
+            int y_start = std::max(0, cy);
+            int x_end = std::min(360, cx + cw);
+            int y_end = std::min(360, cy + ch);
+
+            // draw pixels
+            for (int y = y_start; y < y_end; y++) {
+              for (int x = x_start; x < x_end; x++) {
+                uint16_t p = src_buf[y * 360 + x];
+                it.draw_pixel_at(x, y, Color(((p >> 11) & 0x1F) << 3, ((p >> 5) & 0x3F) << 2, (p & 0x1F) << 3));
+              }
+            }
+          }
+      }
+      
 output:
   - platform: ledc
     pin: GPIO15

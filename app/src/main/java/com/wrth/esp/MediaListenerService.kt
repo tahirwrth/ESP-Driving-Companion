@@ -52,7 +52,7 @@ class MediaListenerService : NotificationListenerService() {
 
             // alert tracking
             if (fullStr.contains("police") || fullStr.contains("camera") || fullStr.contains("traffic") || fullStr.contains("hazard")) {
-                Log.w(TAG, "NAV_DEBUG: POLICE/HAZARD DETECTED! Sending Alert.")
+                Log.w(TAG, "NAV: Police detected. Sending alert")
                 BleManager.sendAlertPacket("POLICE")
                 return
             }
@@ -102,7 +102,7 @@ class MediaListenerService : NotificationListenerService() {
 
         if (street.isBlank()) street = "Follow Route"
 
-        Log.w(TAG, "NAV_DEBUG: Sending -> Turn: [$turn] Dist: [$distance] Street: [$street] Exit: [$exitNumber]")
+        Log.w(TAG, "NAV: Sending -> Turn: [$turn] Dist: [$distance] Street: [$street] Exit: [$exitNumber]")
 
         BleManager.sendAlertPacket("CLEAR")
         Thread.sleep(100)
@@ -130,7 +130,11 @@ class MediaListenerService : NotificationListenerService() {
         script.forEach(output)
         output.copyTo(outputBitmap)
 
+        input.destroy()
+        output.destroy()
+        script.destroy()
         rs.destroy()
+
         return outputBitmap
     }
 
@@ -171,8 +175,8 @@ class MediaListenerService : NotificationListenerService() {
                     canvas.drawBitmap(blurredBg, bgLeft, bgTop, bgPaint)
                     canvas.drawColor(Color.argb(70, 0, 0, 0))
 
-                    val coverSize = 170
-                    val coverYPosition = 45f
+                    val coverSize = 180
+                    val coverYPosition = 50f
 
                     val centerArt = bitmap.scale(coverSize, coverSize)
                     val centerLeft = (finalWidth - coverSize) / 2f
@@ -206,10 +210,10 @@ class MediaListenerService : NotificationListenerService() {
                     val displayArtist = if (artist.length > 30) artist.take(27) + "..." else artist
 
                     canvas.drawText(displayTitle, 180f, textBaseY + 40f, titlePaint)
-                    canvas.drawText(displayArtist, 180f, textBaseY + 70f, artistPaint)
+                    canvas.drawText(displayArtist, 180f, textBaseY + 65f, artistPaint)
 
                     val stream = ByteArrayOutputStream()
-                    finalBitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream)
+                    finalBitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
                     val jpgData = stream.toByteArray()
                     val currentHash = jpgData.contentHashCode()
 
@@ -217,6 +221,13 @@ class MediaListenerService : NotificationListenerService() {
 
                     BleManager.latestImageData = jpgData
                     BleManager.latestImageHash = currentHash
+
+                    BleManager.sendMediaHash(currentHash)
+
+                    bgBitmap.recycle()
+                    blurredBg.recycle()
+                    centerArt.recycle()
+                    finalBitmap.recycle()
                 }
             }
         }

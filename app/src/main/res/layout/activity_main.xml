@@ -12,11 +12,25 @@
         android:text="@string/start_connection" />
 
     <Button
+        android:id="@+id/btnTestBoost"
+        android:layout_width="200dp"
+        android:layout_height="wrap_content"
+        android:text="@string/test_boost_gauge" />
+
+    <Button
+        android:id="@+id/btnOpenAnimations"
+        android:layout_width="200dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:backgroundTint="#330000"
+        android:textColor="#FF0000"
+        android:text="Animations" />
+
+    <Button
         android:id="@+id/btnStop"
         android:layout_width="200dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="20dp"
         android:backgroundTint="#d32f2f"
         android:text="@string/stop_kill_switch" />
-
 </LinearLayout>
